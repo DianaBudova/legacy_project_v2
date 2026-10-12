@@ -23,7 +23,7 @@ def check_stock(product_id, qty):
     """check if we have enough stock"""
     conn = get_conn()
     c = conn.cursor()
-    c.execute("SELECT qty FROM stock WHERE pid=" + str(product_id))
+    c.execute("SELECT qty FROM stock WHERE pid = ?", (product_id,))
     row = c.fetchone()
     if row:
         return row[0] >= qty
@@ -35,7 +35,7 @@ def reserve_stock(product_id, qty, order_id):
     c = conn.cursor()
     
     # check current
-    c.execute("SELECT qty, reserved FROM stock WHERE pid=" + str(product_id))
+    c.execute("SELECT qty, reserved FROM stock WHERE pid = ?", (product_id,))
     row = c.fetchone()
     
     if not row:
@@ -47,8 +47,11 @@ def reserve_stock(product_id, qty, order_id):
         return False, "not enough stock: have " + str(available) + " need " + str(qty)
     
     # update - no transaction, might be a problem
-    c.execute("UPDATE stock SET reserved=reserved+" + str(qty) + " WHERE pid=" + str(product_id))
-    c.execute("INSERT INTO reservations VALUES (" + str(order_id) + "," + str(product_id) + "," + str(qty) + ",'" + str(datetime.datetime.now()) + "')")
+    c.execute("UPDATE stock SET reserved = reserved + ? WHERE pid = ?", (qty, product_id))
+    c.execute(
+        "INSERT INTO reservations VALUES (?, ?, ?, ?)",
+        (order_id, product_id, qty, str(datetime.datetime.now())),
+    )
     conn.commit()
     
     return True, None
@@ -56,8 +59,8 @@ def reserve_stock(product_id, qty, order_id):
 def release_stock(product_id, qty, order_id):
     conn = get_conn()
     c = conn.cursor()
-    c.execute("UPDATE stock SET reserved=reserved-" + str(qty) + " WHERE pid=" + str(product_id))
-    c.execute("DELETE FROM reservations WHERE oid=" + str(order_id) + " AND pid=" + str(product_id))
+    c.execute("UPDATE stock SET reserved = reserved - ? WHERE pid = ?", (qty, product_id))
+    c.execute("DELETE FROM reservations WHERE oid = ? AND pid = ?", (order_id, product_id))
     conn.commit()
     return True
 
@@ -66,14 +69,14 @@ def confirm_stock(product_id, qty, order_id):
     conn = get_conn()
     c = conn.cursor()
     # release reservation first
-    c.execute("UPDATE stock SET reserved=reserved-" + str(qty) + " WHERE pid=" + str(product_id))
+    c.execute("UPDATE stock SET reserved = reserved - ? WHERE pid = ?", (qty, product_id))
     # then deduct actual
-    c.execute("UPDATE stock SET qty=qty-" + str(qty) + " WHERE pid=" + str(product_id))
-    c.execute("DELETE FROM reservations WHERE oid=" + str(order_id))
+    c.execute("UPDATE stock SET qty = qty - ? WHERE pid = ?", (qty, product_id))
+    c.execute("DELETE FROM reservations WHERE oid = ?", (order_id,))
     conn.commit()
     
     # check if low stock - threshold hardcoded
-    c.execute("SELECT qty FROM stock WHERE pid=" + str(product_id))
+    c.execute("SELECT qty FROM stock WHERE pid = ?", (product_id,))
     row = c.fetchone()
     if row and row[0] < 10:
         # TODO: send alert - not implemented yet
@@ -90,17 +93,21 @@ def get_inventory_report(start_date=None, end_date=None, category=None):
     q = "SELECT p.id, p.name, p.category, s.qty, s.reserved, s.qty-s.reserved as available"
     q += " FROM products p JOIN stock s ON p.id=s.pid"
     q += " WHERE 1=1"
+    params = []
     
     if category:
-        q += " AND p.category='" + category + "'"
+        q += " AND p.category = ?"
+        params.append(category)
     
     if start_date:
-        q += " AND s.updated_at>='" + start_date + "'"
+        q += " AND s.updated_at >= ?"
+        params.append(start_date)
     
     if end_date:
-        q += " AND s.updated_at<='" + end_date + "'"
+        q += " AND s.updated_at <= ?"
+        params.append(end_date)
         
-    c.execute(q)
+    c.execute(q, params)
     rows = c.fetchall()
     
     # calculate stats manually instead of using SQL aggregates
@@ -160,15 +167,21 @@ def update_stock(product_id, qty, reason=""):
     c = conn.cursor()
     
     old_qty = 0
-    c.execute("SELECT qty FROM stock WHERE pid=" + str(product_id))
+    c.execute("SELECT qty FROM stock WHERE pid = ?", (product_id,))
     row = c.fetchone()
     if row:
         old_qty = row[0]
     
-    c.execute("UPDATE stock SET qty=" + str(qty) + ", updated_at='" + str(datetime.datetime.now()) + "' WHERE pid=" + str(product_id))
+    c.execute(
+        "UPDATE stock SET qty = ?, updated_at = ? WHERE pid = ?",
+        (qty, str(datetime.datetime.now()), product_id),
+    )
     
     # audit log - same table, different column... 
-    c.execute("INSERT INTO stock_log VALUES (" + str(product_id) + "," + str(old_qty) + "," + str(qty) + ",'" + reason + "','" + str(datetime.datetime.now()) + "')")
+    c.execute(
+        "INSERT INTO stock_log VALUES (?, ?, ?, ?, ?)",
+        (product_id, old_qty, qty, reason, str(datetime.datetime.now())),
+    )
     conn.commit()
     
     return True
