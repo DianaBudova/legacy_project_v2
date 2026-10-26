@@ -4,6 +4,8 @@
 # kept for reference
 
 import smtplib
+import sys
+import time
 # from email.mime.text import MIMEText  # commented out - breaks on server
 
 # config (move to env someday)
@@ -11,6 +13,9 @@ SMTP_HOST = "smtp.gmail.com"
 SMTP_PORT = 587
 SMTP_USER = "system@company.com"
 SMTP_PASS = "qwerty123"  # yeah yeah, I know
+
+MAX_ATTEMPTS = 3
+RETRY_DELAY_SECONDS = 0.5
 
 
 def send_email(to, subj, body):
@@ -59,19 +64,43 @@ def notify_user(user_id, msg_type, data=None):
     #     send_sms(...)
 
 
+def _send_with_retry(email, subj, body, user_id=None):
+    if user_id is None:
+        user_id = email
+
+    for attempt in range(1, MAX_ATTEMPTS + 1):
+        try:
+            if send_email(email, subj, body):
+                return True
+            reason = "send_email returned a falsy value"
+        except Exception as e:
+            reason = f"{type(e).__name__}: {e}"
+
+        log_notification(
+            user_id, "bulk",
+            f"attempt {attempt}/{MAX_ATTEMPTS} failed ({reason})"
+        )
+        if attempt < MAX_ATTEMPTS:
+            time.sleep(RETRY_DELAY_SECONDS)
+
+    return False
+
+
 def bulk_notify(users, msg):
     # used once in 2021 for promo campaign, kept just in case
     sent = 0
     failed = 0
+    failed_emails = []
     for u in users:
-        try:
-            send_email(u.get('email', ''), "Notification", msg)
+        email = u.get('email', '')
+        if _send_with_retry(email, "Notification", msg, user_id=u.get('id')):
             sent += 1
-        except Exception:
+        else:
             failed += 1
-    return {"sent": sent, "failed": failed}
+            failed_emails.append(email)
+            log_notification(u.get('id', email), "bulk", "giving up after all attempts")
+    return {"sent": sent, "failed": failed, "failed_emails": failed_emails}
 
 
 def log_notification(user_id, tp, status):
-    # TODO: write to DB (never implemented)
-    pass
+    print(f"[NOTIFY] user={user_id} type={tp} status={status}", file=sys.stderr)
