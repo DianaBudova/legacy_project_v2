@@ -1,0 +1,8 @@
+$ radon cc src/process.py -s
+src/process.py
+    F 9:0 proc - C (11)
+    F 84:0 validate_order - B (8)
+    F 111:0 get_discount - A (4)
+    F 134:0 _summarize - A (4)
+    F 103:0 calculate_tax - A (2)
+    F 124:0 _paid_order - A (1)

@@ -1,142 +1,137 @@
-# process.py
-# Core business logic. DO NOT TOUCH without consulting senior dev.
-# Last major change: 2022-08-10 (hotfix for production issue)
+"""Order orchestration with isolated financial rules and compatible output."""
+from collections import Counter
+from enum import Enum, IntEnum
 
 from src.db import get_data, save
-from src.utils import calc, chk, chk2, fmt, format_date, tot, p
+from src.utils import calc, format_date
+
+
+class Role(IntEnum):
+    """Known user roles; any other role uses the standard tax policy."""
+
+    REGULAR = 2
+    PREMIUM = 3
+
+
+class OrderStatus(str, Enum):
+    """Persisted order states, including the legacy validation-only refund."""
+
+    PAID = "paid"
+    PENDING = "pending"
+    CANCELLED = "cancelled"
+    REFUNDED = "refunded"
+    PROCESSED = "processed"
+
+
+STANDARD_TAX_RATE = 0.20
+PREMIUM_TAX_RATE = 0.15
+PREMIUM_DISCOUNT_TIERS = ((1000, 0.05), (500, 0.03))
+VALID_STATUSES = tuple(status.value for status in OrderStatus
+                       if status != OrderStatus.PROCESSED)
+REQUIRED_FIELDS = ("user_id", "product_id", "status")
 
 
 def proc(params=None):
-    """process orders - main business flow"""
+    """Load, process and save orders; retain the unused legacy params argument."""
+    del params
     orders = get_data("orders")
-    users = get_data("users")
-    products = get_data("products")
-
-    result = []
-    errors = []
-    total_revenue = 0
-    total_tax = 0
-
-    for o in orders:
-        # find user
-        u = None
-        for usr in users:
-            if usr['id'] == o['user_id']:
-                u = usr
-                break
-
-        if u is None:
-            errors.append({"order_id": o['id'], "error": "user not found"})
-            continue
-
-        # find product
-        pr = None
-        for prod in products:
-            if prod['id'] == o['product_id']:
-                pr = prod
-                break
-
-        if pr is None:
-            errors.append({"order_id": o['id'], "error": "product not found"})
-            continue
-
-        # process based on status
-        if o['status'] == 'paid':
-            record = _paid_order(o, u)
-            total_revenue += record["net"]
-            total_tax += record["tax"]
-            result.append(record)
-
-        elif o['status'] == 'pending':
-            # pending orders - just log
-            result.append({
-                "order_id": o['id'],
-                "user": u['name'],
-                "amount": o['amount'],
-                "status": "pending",
-                "date": format_date(o['date'])
-            })
-
-        elif o['status'] == 'cancelled':
-            # cancelled - skip but log
-            result.append({
-                "order_id": o['id'],
-                "user": u['name'],
-                "amount": 0,
-                "status": "cancelled",
-                "date": format_date(o['date'])
-            })
-
+    users = _index_by_id(get_data("users"))
+    products = _index_by_id(get_data("products"))
+    records, errors = [], []
+    for order in orders:
+        record, error = _process_order(order, users, products)
+        if error is not None:
+            errors.append(error)
         else:
-            errors.append({
-                "order_id": o['id'],
-                "error": f"unknown status: {o['status']}"
-            })
-
-    summary = _summarize(result, errors, total_revenue, total_tax)
-
-    save("processed_orders", result)
+            records.append(record)
+    summary = _summarize(records, errors)
+    save("processed_orders", records)
     save("summary", summary)
-
-    return {"orders": result, "summary": summary}
-
-
-def validate_order(o):
-    # added in CR-156 - should have been here from start
-    if not o:
-        return False, "empty order"
-    if 'amount' not in o:
-        return False, "no amount"
-    if o.get('amount', 0) <= 0:
-        return False, "invalid amount"
-    if 'user_id' not in o:
-        return False, "no user_id"
-    if 'product_id' not in o:
-        return False, "no product_id"
-    if 'status' not in o:
-        return False, "no status"
-    if o['status'] not in ['paid', 'pending', 'cancelled', 'refunded']:
-        return False, f"invalid status: {o['status']}"
-    return True, None
+    return {"orders": records, "summary": summary}
 
 
-def calculate_tax(amount, role):
-    # duplicated from proc() - should be unified (CR-212, low priority)
-    if role == 3:
-        return calc(amount, 0.15)
-    else:
-        return calc(amount, 0.2)
+def _index_by_id(items):
+    """Index hashable entity IDs, preserving the first duplicate as before."""
+    indexed = {}
+    for item in items:
+        indexed.setdefault(item["id"], item)
+    return indexed
 
 
-def get_discount(amount, role):
-    # same logic as in proc() - also duplicated
-    if role != 3:
-        return 0
-    if amount > 1000:
-        return calc(amount, 0.05)
-    elif amount > 500:
-        return calc(amount, 0.03)
-    return 0
+def _process_order(order, users, products):
+    """Resolve references and dispatch an order, preserving error precedence."""
+    user = users.get(order["user_id"])
+    if user is None:
+        return None, {"order_id": order["id"], "error": "user not found"}
+    if order["product_id"] not in products:
+        return None, {"order_id": order["id"], "error": "product not found"}
+    status = order["status"]
+    if status == OrderStatus.PAID:
+        return _paid_order(order, user), None
+    if status in (OrderStatus.PENDING, OrderStatus.CANCELLED):
+        return _order_record(order, user, status), None
+    return None, {"order_id": order["id"], "error": f"unknown status: {status}"}
 
-# CR-156 validation
+
+def _order_record(order, user, status):
+    """Format the common output fields without modifying the input order."""
+    return {
+        "order_id": order["id"], "user": user["name"],
+        "amount": 0 if status == OrderStatus.CANCELLED else order["amount"],
+        "status": status, "date": format_date(order["date"]),
+    }
 
 
 def _paid_order(order, user):
-    """Calculate one paid order using the public financial policies."""
+    """Apply the single tax and discount policy to one paid order."""
     amount = order["amount"]
     tax = calculate_tax(amount, user["role"])
     discount = get_discount(amount, user["role"])
-    return {"order_id": order["id"], "user": user["name"], "amount": amount,
-            "discount": discount, "tax": tax, "net": amount-discount-tax,
-            "status": "processed", "date": format_date(order["date"])}
+    record = _order_record(order, user, OrderStatus.PROCESSED.value)
+    record.update(tax=tax, discount=discount, net=amount-discount-tax)
+    return record
 
 
-def _summarize(records, errors, revenue, tax):
-    """Summarize processing results without accessing persistence."""
+def _summarize(records, errors):
+    """Aggregate result counts and rounded totals, retaining record order."""
+    counts = Counter(record["status"] for record in records)
     return {
-        "processed": sum(r["status"] == "processed" for r in records),
-        "pending": sum(r["status"] == "pending" for r in records),
-        "cancelled": sum(r["status"] == "cancelled" for r in records),
-        "total_revenue": round(revenue, 2), "total_tax": round(tax, 2),
+        "processed": counts[OrderStatus.PROCESSED],
+        "pending": counts[OrderStatus.PENDING],
+        "cancelled": counts[OrderStatus.CANCELLED],
+        "total_revenue": round(sum(record.get("net", 0) for record in records), 2),
+        "total_tax": round(sum(record.get("tax", 0) for record in records), 2),
         "errors": errors,
     }
+
+
+def _validation_checks(order):
+    """Yield checks lazily to retain first-error order and legacy exceptions."""
+    yield "amount" in order, "no amount"
+    yield not order.get("amount", 0) <= 0, "invalid amount"
+    yield from ((key in order, f"no {key}") for key in REQUIRED_FIELDS)
+    yield order["status"] in VALID_STATUSES, f"invalid status: {order['status']}"
+
+
+def validate_order(o):
+    """Return (valid, first error) with the existing permissive validation rules."""
+    if not o:
+        return False, "empty order"
+    error = next((message for valid, message in _validation_checks(o) if not valid), None)
+    return error is None, error
+
+
+def calculate_tax(amount, role):
+    """Return tax rounded by calc(), using the premium or standard rate."""
+    rate = PREMIUM_TAX_RATE if role == Role.PREMIUM else STANDARD_TAX_RATE
+    return calc(amount, rate)
+
+
+def get_discount(amount, role):
+    """Return premium discounts with strict thresholds and existing rounding."""
+    if role != Role.PREMIUM:
+        return 0
+    for threshold, rate in PREMIUM_DISCOUNT_TIERS:
+        if amount > threshold:
+            return calc(amount, rate)
+    return 0

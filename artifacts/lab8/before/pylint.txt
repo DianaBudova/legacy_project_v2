@@ -1,0 +1,21 @@
+$ pylint src/process.py --score=y --persistent=n
+************* Module src.process
+src/process.py:1:0: C0114: Missing module docstring (missing-module-docstring)
+src/process.py:9:0: R0912: Too many branches (16/12) (too-many-branches)
+src/process.py:9:0: R0915: Too many statements (55/50) (too-many-statements)
+src/process.py:9:9: W0613: Unused argument 'params' (unused-argument)
+src/process.py:140:0: C0116: Missing function or method docstring (missing-function-docstring)
+src/process.py:140:0: R0911: Too many return statements (8/6) (too-many-return-statements)
+src/process.py:159:0: C0116: Missing function or method docstring (missing-function-docstring)
+src/process.py:161:4: R1705: Unnecessary "else" after "return", remove the "else" and de-indent the code inside it (no-else-return)
+src/process.py:167:0: C0116: Missing function or method docstring (missing-function-docstring)
+src/process.py:171:4: R1705: Unnecessary "elif" after "return", replace only that "elif" with "if" (no-else-return)
+src/process.py:6:0: W0611: Unused chk imported from src.utils (unused-import)
+src/process.py:6:0: W0611: Unused chk2 imported from src.utils (unused-import)
+src/process.py:6:0: W0611: Unused fmt imported from src.utils (unused-import)
+src/process.py:6:0: W0611: Unused tot imported from src.utils (unused-import)
+src/process.py:6:0: W0611: Unused p imported from src.utils (unused-import)
+
+-----------------------------------
+Your code has been rated at 8.28/10
+

@@ -1,0 +1,55 @@
+{
+  "loc": 137,
+  "functions": [
+    {
+      "name": "proc",
+      "line": 34,
+      "loc": 17
+    },
+    {
+      "name": "_index_by_id",
+      "line": 53,
+      "loc": 6
+    },
+    {
+      "name": "_process_order",
+      "line": 61,
+      "loc": 13
+    },
+    {
+      "name": "_order_record",
+      "line": 76,
+      "loc": 7
+    },
+    {
+      "name": "_paid_order",
+      "line": 85,
+      "loc": 8
+    },
+    {
+      "name": "_summarize",
+      "line": 95,
+      "loc": 11
+    },
+    {
+      "name": "_validation_checks",
+      "line": 108,
+      "loc": 6
+    },
+    {
+      "name": "validate_order",
+      "line": 116,
+      "loc": 6
+    },
+    {
+      "name": "calculate_tax",
+      "line": 124,
+      "loc": 4
+    },
+    {
+      "name": "get_discount",
+      "line": 130,
+      "loc": 8
+    }
+  ]
+}

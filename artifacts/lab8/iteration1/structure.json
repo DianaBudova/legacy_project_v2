@@ -1,0 +1,25 @@
+{
+  "loc": 177,
+  "functions": [
+    {
+      "name": "proc",
+      "line": 9,
+      "loc": 129
+    },
+    {
+      "name": "validate_order",
+      "line": 140,
+      "loc": 17
+    },
+    {
+      "name": "calculate_tax",
+      "line": 159,
+      "loc": 6
+    },
+    {
+      "name": "get_discount",
+      "line": 167,
+      "loc": 9
+    }
+  ]
+}
