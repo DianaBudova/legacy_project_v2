@@ -42,59 +42,10 @@ def proc(params=None):
 
         # process based on status
         if o['status'] == 'paid':
-            if u['role'] == 3:
-                # premium user
-                tax = calc(o['amount'], 0.15)
-                discount = 0
-                if o['amount'] > 1000:
-                    discount = calc(o['amount'], 0.05)
-                elif o['amount'] > 500:
-                    discount = calc(o['amount'], 0.03)
-                net = o['amount'] - discount - tax
-                total_revenue += net
-                total_tax += tax
-                result.append({
-                    "order_id": o['id'],
-                    "user": u['name'],
-                    "amount": o['amount'],
-                    "discount": discount,
-                    "tax": tax,
-                    "net": net,
-                    "status": "processed",
-                    "date": format_date(o['date'])
-                })
-            elif u['role'] == 2:
-                # regular user
-                tax = calc(o['amount'], 0.2)
-                net = o['amount'] - tax
-                total_revenue += net
-                total_tax += tax
-                result.append({
-                    "order_id": o['id'],
-                    "user": u['name'],
-                    "amount": o['amount'],
-                    "discount": 0,
-                    "tax": tax,
-                    "net": net,
-                    "status": "processed",
-                    "date": format_date(o['date'])
-                })
-            else:
-                # other roles - no discount, standard tax
-                tax = calc(o['amount'], 0.2)
-                net = o['amount'] - tax
-                total_revenue += net
-                total_tax += tax
-                result.append({
-                    "order_id": o['id'],
-                    "user": u['name'],
-                    "amount": o['amount'],
-                    "discount": 0,
-                    "tax": tax,
-                    "net": net,
-                    "status": "processed",
-                    "date": format_date(o['date'])
-                })
+            record = _paid_order(o, u)
+            total_revenue += record["net"]
+            total_tax += record["tax"]
+            result.append(record)
 
         elif o['status'] == 'pending':
             # pending orders - just log
@@ -122,14 +73,7 @@ def proc(params=None):
                 "error": f"unknown status: {o['status']}"
             })
 
-    summary = {
-        "processed": len([r for r in result if r['status'] == 'processed']),
-        "pending": len([r for r in result if r['status'] == 'pending']),
-        "cancelled": len([r for r in result if r['status'] == 'cancelled']),
-        "total_revenue": round(total_revenue, 2),
-        "total_tax": round(total_tax, 2),
-        "errors": errors
-    }
+    summary = _summarize(result, errors, total_revenue, total_tax)
 
     save("processed_orders", result)
     save("summary", summary)
@@ -175,3 +119,24 @@ def get_discount(amount, role):
     return 0
 
 # CR-156 validation
+
+
+def _paid_order(order, user):
+    """Calculate one paid order using the public financial policies."""
+    amount = order["amount"]
+    tax = calculate_tax(amount, user["role"])
+    discount = get_discount(amount, user["role"])
+    return {"order_id": order["id"], "user": user["name"], "amount": amount,
+            "discount": discount, "tax": tax, "net": amount-discount-tax,
+            "status": "processed", "date": format_date(order["date"])}
+
+
+def _summarize(records, errors, revenue, tax):
+    """Summarize processing results without accessing persistence."""
+    return {
+        "processed": sum(r["status"] == "processed" for r in records),
+        "pending": sum(r["status"] == "pending" for r in records),
+        "cancelled": sum(r["status"] == "cancelled" for r in records),
+        "total_revenue": round(revenue, 2), "total_tax": round(tax, 2),
+        "errors": errors,
+    }
